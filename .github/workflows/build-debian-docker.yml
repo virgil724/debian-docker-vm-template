@@ -29,7 +29,7 @@ jobs:
         env:
           LIBGUESTFS_BACKEND: direct
         run: |
-          sudo --preserve-env=LIBGUESTFS_BACKEND virt-customize -a src.qcow2 \
+          virt-customize -a src.qcow2 \
             --smp 2 --verbose \
             --timezone "Asia/Taipei" \
             --run-command "sed -i 's|Types: deb deb-src|Types: deb|g' /etc/apt/sources.list.d/debian.sources" \
@@ -49,8 +49,7 @@ jobs:
 
       - name: Sparsify
         run: |
-          sudo virt-sparsify --compress src.qcow2 debian-13-docker.qcow2
-          sudo chown $USER:$USER debian-13-docker.qcow2
+          virt-sparsify --compress src.qcow2 debian-13-docker.qcow2
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
