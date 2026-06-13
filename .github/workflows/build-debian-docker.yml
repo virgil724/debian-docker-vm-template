@@ -14,8 +14,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libguestfs-tools qemu-utils axel
 
-      - name: Allow kernel read (CI only)
-        run: sudo chmod 0644 /boot/vmlinuz-$(uname -r) || true
+      - name: Allow kernel read + KVM access (CI only)
+        run: |
+          sudo chmod 0644 /boot/vmlinuz-$(uname -r) || true
+          sudo chmod 0666 /dev/kvm || true
+
+      - name: Relax passt AppArmor confinement (CI only)
+        run: |
+          # Ubuntu 24.04 ships an AppArmor profile for passt (libguestfs's
+          # network backend) that only permits writing PID files matching a
+          # fixed name pattern. libguestfs uses passtN.pid, which is denied,
+          # so passt exits 1 with "PID file open: Permission denied". Put the
+          # profile into complain mode (and unload it) on the CI runner.
+          sudo apt-get install -y apparmor-utils
+          sudo aa-complain /usr/bin/passt 2>/dev/null || true
+          sudo aa-complain /usr/sbin/passt 2>/dev/null || true
+          for p in /etc/apparmor.d/*passt*; do
+            [ -e "$p" ] || continue
+            sudo apparmor_parser -R "$p" 2>/dev/null || true
+          done
 
       - name: Download Debian 13 genericcloud
         run: |
