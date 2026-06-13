@@ -1,0 +1,60 @@
+name: Build Debian Docker Cloud Image
+
+on:
+  workflow_dispatch:        # 手動觸發
+  schedule:
+    - cron: '0 2 * * 1'     # 每週一自動重建(追 Debian 上游更新)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libguestfs-tools qemu-utils axel
+
+      - name: Allow kernel read (CI only)
+        run: sudo chmod 0644 /boot/vmlinuz-$(uname -r) || true
+
+      - name: Download Debian 13 genericcloud
+        run: |
+          axel -n 8 -o src.qcow2 \
+            https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+          curl -fsSL -O https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS
+          EXPECTED=$(grep genericcloud-amd64.qcow2 SHA512SUMS | awk '{print $1}')
+          echo "$EXPECTED  src.qcow2" | sha512sum -c -
+
+      - name: Customize (install Docker + qemu-guest-agent)
+        env:
+          LIBGUESTFS_BACKEND: direct
+        run: |
+          sudo --preserve-env=LIBGUESTFS_BACKEND virt-customize -a src.qcow2 \
+            --smp 2 --verbose \
+            --timezone "Asia/Taipei" \
+            --run-command "sed -i 's|Types: deb deb-src|Types: deb|g' /etc/apt/sources.list.d/debian.sources" \
+            --update \
+            --install "sudo,qemu-guest-agent,spice-vdagent,bash-completion,unzip,wget,curl,vim,htop,dnsutils,zstd,ca-certificates,gnupg" \
+            --run-command "install -m 0755 -d /etc/apt/keyrings" \
+            --run-command "curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc" \
+            --run-command "chmod a+r /etc/apt/keyrings/docker.asc" \
+            --run-command 'echo \"deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable\" > /etc/apt/sources.list.d/docker.list' \
+            --run-command "apt-get update" \
+            --install "docker-ce,docker-ce-cli,containerd.io,docker-buildx-plugin,docker-compose-plugin" \
+            --run-command "systemctl enable docker.service containerd.service qemu-guest-agent.service" \
+            --run-command "apt-get -y autoremove --purge && apt-get -y clean" \
+            --delete "/var/log/*.log" \
+            --delete "/var/lib/apt/lists/*" \
+            --truncate "/etc/machine-id"
+
+      - name: Sparsify
+        run: |
+          sudo virt-sparsify --compress src.qcow2 debian-13-docker.qcow2
+          sudo chown $USER:$USER debian-13-docker.qcow2
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-13-docker-qcow2
+          path: debian-13-docker.qcow2
+          retention-days: 14
